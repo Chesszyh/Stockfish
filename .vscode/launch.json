@@ -26,7 +26,7 @@
                 "trace": true,
                 "exceptions": true,
                 "traceResponse": true
-            }
+            },
         }
     ]
 }

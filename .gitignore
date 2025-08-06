@@ -19,5 +19,10 @@ tests/bench_tmp.epd
 # clangd cache
 *.cache/
 
-# clion
-*.idea
+# data files
+dataset/
+data/
+gui/
+stockfish
+*.binpack
+*.binary

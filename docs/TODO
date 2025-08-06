@@ -1,0 +1,13 @@
+# TODO
+
+- 先把训练跑起来，再考虑神经网络的可解释性
+- 目前stockfish-nnue的训练脚本是easy_train.py，数据集没有，wiki里有很多todo，对初学者上手并不友好。我可以考虑写个完整教程或一键脚本之类的。
+
+- 下载数据集：`gdown --id 1lFC_tej8WyXojhh7-AmXV_kkrTauEsqt --no-cookies`
+
+我也是头一次知道google drive是有限速的，命令运行的好好的，我手欠终止了，结果再次运行就提示：Too many users have viewed or downloaded this file recently.
+
+下次下载的时候不要乱切节点了。
+
+- 目前跑stockfish生成数据，60线程下每秒将近 20000 个 sfens，数据生成速度非常快。也许可以考虑用autodl: 已有数据集使用gpu训练网络，并同时利用高配置CPU本地生成数据集。
+
