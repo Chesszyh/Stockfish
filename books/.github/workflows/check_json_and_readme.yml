@@ -1,0 +1,40 @@
+# This workflow will run update_json.py and update_readme.py on the PR
+
+name: check books.json and README.md
+on:
+  push:
+    branches:
+      - master
+      - github_ci
+  pull_request:
+    branches:
+      - master
+jobs:
+  check_json_and_readme:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v4
+
+      - name: install deps
+        run: pip install chess
+
+      - name: run update_json.py
+        run: rm -f books.json && python update_json.py
+
+      - name: verify books.json
+        run: |
+          git diff --quiet --exit-code books.json || {
+            git --no-pager diff --no-color books.json
+            exit 1
+          }
+
+      - name: run update_readme.py
+        run: python update_readme.py
+
+      - name: verify README.md
+        run: |
+          git diff --quiet --exit-code README.md || {
+            git --no-pager diff --no-color README.md
+            exit 1
+          }
