@@ -1,22 +1,23 @@
 #!/bin/bash
+# pip install asciimatics pytorch-lightning GPUtil
 python easy_train.py \
-    --training-dataset=/home/vondele/chess/vondele/gensfen/gensfen_2021_09_02/nodes5000pv2_UHO.binpack \
-    --validation-dataset=/home/vondele/chess/vondele/gensfen/gensfen_2021_09_02/nodes5000pv2_UHO.binpack \
+    --training-dataset=/home/chesszyh/Project/stockfish/nnue-pytorch/data/data_d9_2021_09_02.binpack \
+    --validation-dataset=/home/chesszyh/Project/stockfish/nnue-pytorch/data/data_d9_2021_09_02.binpack \
     --num-workers=4 \
     --threads=2 \
     --gpus="0," \
-    --runs-per-gpu=2 \
+    --runs-per-gpu=1 \
     --batch-size=16384 \
-    --max_epoch=10 \
+    --max_epoch=3 \
     --do-network-training=True \
-    --do-network-testing=True \
-    --tui=True \
+    --do-network-testing=False \
+    --tui=False \
     --network-save-period=1 \
     --random-fen-skipping=3 \
     --start-lambda=1.0 \
     --end-lambda=0.75 \
     --fail-on-experiment-exists=False \
-    --build-engine-arch=x86-64-modern \
+    --build-engine-arch=x86-64-bmi2 \
     --build-threads=2 \
     --epoch-size=1638400 \
     --validation-size=16384 \

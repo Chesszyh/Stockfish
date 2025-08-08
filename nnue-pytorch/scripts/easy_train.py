@@ -725,10 +725,15 @@ class TrainingRun(Thread):
     """
 
     # The regex pattern for extracting information from the pytorch lightning's tqdm process bar output
-    ITERATION_PATTERN = re.compile(
-        f"Epoch (\\d+).*?(\\d+)/(\\d+).*?({NUMERIC_CONST_PATTERN})it/s, loss=({NUMERIC_CONST_PATTERN})"
-    )
-
+    # ITERATION_PATTERN = re.compile(
+    #     f"Epoch (\\d+).*?(\\d+)/(\\d+).*?({NUMERIC_CONST_PATTERN})it/s, loss=({NUMERIC_CONST_PATTERN})"
+    # 
+    # FIXME 训练代码使用进度条的正则匹配判断训练是否完成，Lightning 2.x进度条与脚本内的正则不完全匹配，导致最后一轮没有被统计到，于是子进程退出后被误判为“未完成”
+    # 允许匹配 PL 1.x/2.x 的两种常见格式
+    ITERATION_PATTERNS = [
+        re.compile(f"Epoch (\\d+).*?(\\d+)/(\\d+).*?({NUMERIC_CONST_PATTERN})it/s, loss=({NUMERIC_CONST_PATTERN})"),
+        re.compile(r"Epoch\s+(\d+).*?(\d+)/(\d+).*?([0-9.+\-eE]+)\s*it/s.*?loss=([0-9.+\-eE]+)")
+    ]
     def __init__(
         self,
         gpu_id,
@@ -809,7 +814,16 @@ class TrainingRun(Thread):
         # For speed calculation
         self._last_time = None
         self._last_step = None
+    
+    def _finished_flag_path(self):
+        return os.path.join(self._root_dir, "training_finished")
 
+    def _check_finished_flag(self):
+        try:
+            return os.path.exists(self._finished_flag_path())
+        except:
+            return False
+        
     def _get_stringified_args(self):
         args = [
             f"--num-workers={self._num_data_loader_threads}",
@@ -957,16 +971,30 @@ class TrainingRun(Thread):
         # we can just estimate whether it finished with a success by using some margin...
         # NOTE: We still cannot catch when the trainer exits with no work, which for example
         #       happens when resuming from a checkpoint at the end of training.
+
+        # HACK 子进程已退出，这里用可靠信号判定成功
+        rc = None
+        try:
+            rc = self._process.wait(timeout=5)
+        except:
+            pass
+
+        if self._check_finished_flag() or rc == 0:
+            self._has_finished = True
+            self._error = None
         if (
-            self._has_started
+            not self._has_finished
+            and self._has_started
             and self._current_epoch == self._num_epochs - 1
+            and self._num_steps_in_epoch
+            and self._current_step_in_epoch is not None
             and self._current_step_in_epoch >= self._num_steps_in_epoch * 0.9
         ):
             self._has_finished = True
 
         if self._running and not self._has_finished:
             if not self._error:
-                self._error = "Unknown error occured."
+                self._error = f"Unknown error occured(rc={rc})."    # NOTE 此处报错太过笼统，应优化
             LOGGER.warning(f"Training run {self._run_id} exited unexpectedly.")
             LOGGER.error(f"Error: {self._error}")
         else:
