@@ -26,3 +26,13 @@ Stockfish 有一个包含各种工具的[分支](https://github.com/official-sto
 1. 我的机器: CPU: 13th Gen Intel(R) Core(TM) i9-13900HX (32) @ 5.40 GHz 16G,最多可以64线程; GPU: NVIDIA GeForce RTX 4060 Max-Q / Mobile [Discrete]
 
 如何压榨机器性能，最快获得高质量数据集？请参考文档，给出最佳调参实践。
+
+# Lc0
+
+这是lc0 chess engine的官方仓库.请仔细阅读readme, 文档, wiki和项目代码等,完成: 
+
+1. 将wiki/下的全部文档都翻译成中文，创建到同一目录下。
+2. 介绍lc0的原理，lc0的训练方法，lc0的使用方法，lc0的代码结构，lc0的测试方法等，总结成文档，创建到docs/lc0-start.md。
+
+> A potential loop was detected. This can happen due to repetitive tool calls or other model 
+  behavior. The request has been halted.

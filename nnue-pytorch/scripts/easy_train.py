@@ -728,7 +728,7 @@ class TrainingRun(Thread):
     # ITERATION_PATTERN = re.compile(
     #     f"Epoch (\\d+).*?(\\d+)/(\\d+).*?({NUMERIC_CONST_PATTERN})it/s, loss=({NUMERIC_CONST_PATTERN})"
     # 
-    # FIXME 训练代码使用进度条的正则匹配判断训练是否完成，Lightning 2.x进度条与脚本内的正则不完全匹配，导致最后一轮没有被统计到，于是子进程退出后被误判为“未完成”
+    # FIX 训练代码使用进度条的正则匹配判断训练是否完成，Lightning 2.x进度条与脚本内的正则不完全匹配，导致最后一轮没有被统计到，于是子进程退出后被误判为“未完成”
     # 允许匹配 PL 1.x/2.x 的两种常见格式
     ITERATION_PATTERNS = [
         re.compile(f"Epoch (\\d+).*?(\\d+)/(\\d+).*?({NUMERIC_CONST_PATTERN})it/s, loss=({NUMERIC_CONST_PATTERN})"),

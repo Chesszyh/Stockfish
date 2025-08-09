@@ -1,16 +1,15 @@
 #!/bin/bash
-# pip install asciimatics pytorch-lightning GPUtil
 python easy_train.py \
-    --training-dataset=/home/chesszyh/Project/stockfish/nnue-pytorch/data/data_d9_2021_09_02.binpack \
-    --validation-dataset=/home/chesszyh/Project/stockfish/nnue-pytorch/data/data_d9_2021_09_02.binpack \
+    --training-dataset=/workspace/nnue-pytorch/data/data_d9_2021_09_02.binpack \
+    --validation-dataset=/workspace/nnue-pytorch/data/data_d9_2021_09_02.binpack \
     --num-workers=4 \
     --threads=2 \
     --gpus="0," \
     --runs-per-gpu=1 \
     --batch-size=16384 \
-    --max_epoch=3 \
+    --max_epoch=1 \
     --do-network-training=True \
-    --do-network-testing=False \
+    --do-network-testing=True \
     --tui=False \
     --network-save-period=1 \
     --random-fen-skipping=3 \
@@ -23,7 +22,7 @@ python easy_train.py \
     --validation-size=16384 \
     --network-testing-threads=24 \
     --network-testing-explore-factor=1.5 \
-    --network-testing-book="https://github.com/official-stockfish/books/raw/master/UHO_Lichess_4852_v1.epd.zip" \
+    --network-testing-book=/workspace/scripts/easy_train_data_main/books/UHO_Lichess_4852_v1.epd \
     --network-testing-nodes-per-move=20000 \
     --network-testing-hash-mb=8 \
     --network-testing-games-per-round=200 \
@@ -34,4 +33,4 @@ python easy_train.py \
     --experiment-name=test \
     --additional-training-arg="--auto_lr_find=False" \
     --additional-training-arg="--detect_anomaly=False" \
-    --features="HalfKAv2_hm^"
+    --features="HalfKP" # 可能不支持HalfKAv2_hm^

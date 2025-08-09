@@ -20,9 +20,13 @@ tests/bench_tmp.epd
 *.cache/
 
 # data files
+*.epd
+*.zip
+
 dataset/
 data/
 gui/
 stockfish
 *.binpack
 *.binary
+

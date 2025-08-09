@@ -1,5 +1,6 @@
 import re
 import os
+import random
 import subprocess
 import sys
 import time
@@ -174,8 +175,10 @@ def run_match(
     ]
     command += ["-engine", f"cmd={stockfish_base}", "name=master"]
     for net in best:
-        evalfile = os.path.join(os.getcwd(), net)
-        netname = PurePath(*PurePath(evalfile).parts[-2:])
+        # Ensure the path to the network file is absolute
+        evalfile = net if os.path.isabs(net) else os.path.abspath(net)
+        # Use only the filename as the engine name to avoid issues with slashes
+        netname = Path(evalfile).name
         command += [
             "-engine",
             f"cmd={stockfish_test}",
@@ -186,38 +189,54 @@ def run_match(
     # Attempt to run the match multiple times in case of unforseen
     # errors like engine hanging or c-chess-cli having an error...
     for i in range(tries):
-        print_atomic(" ".join(command))
+        print_atomic("Executing command:\n" + " ".join(command))
         print_atomic(
-            "Running match with c-chess-cli ... {}".format(pgn_file_name), flush=True
+            f"Running match with c-chess-cli ... (Attempt {i+1}/{tries})", flush=True
         )
-        c_chess_out = open(os.path.join(root_dir, "c_chess.out"), "w")
-        process = subprocess.Popen(
-            command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
-        )
-        seen = {}
-        for line in process.stdout:
-            line = line.decode("utf-8")
-            c_chess_out.write(line)
-            if "Score" in line:
-                epoch_num = re.search(r"epoch(\d+)", line)
-                if epoch_num.group(1) not in seen:
-                    sys.stdout.write("\n")
-                seen[epoch_num.group(1)] = True
-                sys.stdout.write("\r" + line.rstrip())
-                sys.stdout.flush()
+        c_chess_log_path = os.path.join(root_dir, "c_chess.out")
+        
+        with open(c_chess_log_path, "w") as c_chess_out:
+            process = subprocess.Popen(
+                command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
+            )
+            seen = {}
+            for line in process.stdout:
+                c_chess_out.write(line)
+                if "Score" in line:
+                    epoch_num_match = re.search(r"epoch(\d+)", line)
+                    if epoch_num_match:
+                        epoch_num = epoch_num_match.group(1)
+                        if epoch_num not in seen:
+                            sys.stdout.write("\n")
+                        seen[epoch_num] = True
+                    sys.stdout.write("\r" + line.rstrip())
+                    sys.stdout.flush()
+        
         sys.stdout.write("\n")
-        c_chess_out.close()
-        if process.wait() != 0:
+        rc = process.wait()
+
+        if rc != 0:
+            print_atomic(f"Error running match! (Exit code: {rc})")
+            # Print the tail of the log file for immediate diagnosis
+            try:
+                with open(c_chess_log_path, "r") as f:
+                    log_tail = "".join(f.readlines()[-20:]) # Get last 20 lines
+                print_atomic("--- Last 20 lines of c_chess.out ---")
+                print_atomic(log_tail)
+                print_atomic("------------------------------------")
+            except Exception as e:
+                print_atomic(f"Could not read log file {c_chess_log_path}: {e}")
+
             if i == tries - 1:
-                print_atomic("Error running match!")
+                print_atomic("Match failed after all retries.")
             else:
-                print_atomic(f"Retrying running match ({i}/{tries}) in 10s ...")
+                print_atomic(f"Retrying running match in 10s ...")
                 time.sleep(10)
         else:
+            print_atomic("Match completed successfully.")
             break
 
     print_atomic("Finished running match.")
-
 
 class EngineResults:
     def __init__(self, name):

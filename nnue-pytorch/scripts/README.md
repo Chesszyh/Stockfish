@@ -1,5 +1,13 @@
 # NNUE训练
 
+## 建议
+
+**不要用`easy_train`方式！！**
+
+因为一点都不easy，乱七八糟的报错解决了好几天了。easy_train还会从github拉代码，新代码容易和原有代码、引擎结构、旧的python包产生冲突，连docker方式都报错。
+
+直接参考[train.py](https://github.com/official-stockfish/nnue-pytorch/wiki/Basic-training-procedure-(train.py))即可，在我的RTX 4060上需要把batch-size改为8192,这样差不多GPU利用率和显存占用都能到100%。
+
 ## 部分依赖
 
 - CuPy：NumPy 风格的 GPU 数组库（CUDA 后端），在数据预处理/特征计算时可用到 GPU 加速。
@@ -167,4 +175,17 @@ python easy_train.py \
 - 数据/编译下载走 GitHub，国内网络建议提前准备镜像或手动缓存。
 - gpus 参数在 easy_train.py 只用于决定要启多少个 run，每个 run 都会把单个 GPU ID 传给 train.py；不要把所有 ID 都直接传给 train.py。
 
-需要我根据你机器的 CPU/磁盘具体规格，再帮你微调 num-workers/测试并发吗？
+```bash
+python3 train.py \
+    /home/chesszyh/Project/stockfish/nnue-pytorch/data/data_d9_2021_09_02.binpack \
+    /home/chesszyh/Project/stockfish/nnue-pytorch/data/data_d9_2021_09_02.binpack \
+    --gpus "0," \
+    --threads 4 \
+    --num-workers 4 \
+    --batch-size 16384 \
+    --random-fen-skipping 3 \
+    --features=HalfKAv2_hm^ \
+    --lambda=1.0 \
+    --max_epochs=3 \
+    --default_root_dir /home/chesszyh/Project/stockfish/nnue-pytorch/scripts/easy_train_data/experiments/experiment_test/training/run_0
+```
