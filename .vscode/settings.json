@@ -1,0 +1,25 @@
+{
+  "cmake.configureOnOpen": true,
+  "cmake.useCMakePresets": "always",
+  "cmake.defaultConfigurePreset": "dev-debug",
+  "cmake.defaultBuildPreset": "dev-debug",
+  "cmake.sourceDirectory": "${workspaceFolder}",
+  "cmake.buildBeforeRun": true,
+  "cmake.debugConfig": {
+    "args": [],
+    "cwd": "${workspaceFolder}/src"
+  },
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/build/dev-debug/compile_commands.json",
+  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+  "C_Cpp.default.cppStandard": "c++17",
+  "C_Cpp.default.intelliSenseMode": "linux-gcc-x64",
+  "clangd.arguments": [
+    "--background-index",
+    "--compile-commands-dir=${workspaceFolder}/build/dev-debug",
+    "--header-insertion=never",
+    "--completion-style=detailed"
+  ],
+  "files.associations": {
+    "*.tcc": "cpp"
+  }
+}

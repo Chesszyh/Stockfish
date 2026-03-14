@@ -1,0 +1,62 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "dev-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_CXX_COMPILER": "g++",
+        "STOCKFISH_ARCH": "native"
+      }
+    },
+    {
+      "name": "dev-debug",
+      "inherits": "dev-base",
+      "displayName": "Development Debug",
+      "description": "Debug build for CLion and VSCode",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "dev-release",
+      "inherits": "dev-base",
+      "displayName": "Development Release",
+      "description": "Optimized release build for CLion and VSCode",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "dev-relwithdebinfo",
+      "inherits": "dev-base",
+      "displayName": "Release With Debug Info",
+      "description": "Optimized build that still keeps debug symbols",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "dev-debug",
+      "configurePreset": "dev-debug"
+    },
+    {
+      "name": "dev-release",
+      "configurePreset": "dev-release"
+    },
+    {
+      "name": "dev-relwithdebinfo",
+      "configurePreset": "dev-relwithdebinfo"
+    }
+  ]
+}
