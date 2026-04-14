@@ -623,7 +623,7 @@ ifeq ($(COMP),gcc)
 		profile_make = clang-profile-make
 		profile_use = clang-profile-use
 	else
-		CXXFLAGS += -Wstack-usage=128000
+		CXXFLAGS += -Wstack-usage=128000 -fno-ipa-cp-clone
 	endif
 endif
 
@@ -833,19 +833,28 @@ ifeq ($(pext),yes)
 	endif
 endif
 
-### 3.8.1 Try to include git commit sha for versioning
-GIT_SHA := $(shell git rev-parse HEAD 2>/dev/null | cut -c 1-8)
-ifneq ($(GIT_SHA), )
-	CXXFLAGS += -DGIT_SHA=$(GIT_SHA)
+### 3.8.1 Try to include git info for versioning and avoid recompiles if nothing changes
+BUILD_SHA_FILE  := .build_sha.txt
+BUILD_DATE_FILE := .build_date.txt
+GIT_SHA         := $(shell git rev-parse HEAD 2>/dev/null | cut -c 1-8 || true)
+GIT_DATE        := $(shell git show -s --date=format:%Y%m%d --format=%cd HEAD 2>/dev/null || true)
+COMPILER_DATE   := $(shell date +%Y%m%d 2>/dev/null)
+
+BUILD_DATE      := $(if $(GIT_DATE),$(GIT_DATE),$(COMPILER_DATE))
+
+define cache_file_contents
+$(shell \
+	if [ ! -f "$(1)" ] || [ "$$(cat "$(1)" 2>/dev/null)" != "$(2)" ]; then \
+		printf '%s\n' "$(2)" > "$(1)"; \
+	fi)
+endef
+
+ifneq ($(filter $(MAKECMDGOALS),help strip install clean net objclean profileclean format config-sanity),$(MAKECMDGOALS))
+_ := $(call cache_file_contents,$(BUILD_SHA_FILE),$(GIT_SHA))
+_ := $(call cache_file_contents,$(BUILD_DATE_FILE),$(BUILD_DATE))
 endif
 
-### 3.8.2 Try to include git commit date for versioning
-GIT_DATE := $(shell git show -s --date=format:'%Y%m%d' --format=%cd HEAD 2>/dev/null)
-ifneq ($(GIT_DATE), )
-	CXXFLAGS += -DGIT_DATE=$(GIT_DATE)
-endif
-
-### 3.8.3 Try to include architecture
+### 3.8.2 Try to include architecture
 ifneq ($(ARCH), )
 	CXXFLAGS += -DARCH=$(ARCH)
 endif
@@ -1035,7 +1044,7 @@ clean: objclean profileclean
 
 # clean binaries and objects
 objclean:
-	@rm -f stockfish stockfish.exe *.o ./syzygy/*.o ./nnue/*.o ./nnue/features/*.o
+	@rm -f stockfish stockfish.exe *.o ./syzygy/*.o ./nnue/*.o ./nnue/features/*.o $(BUILD_SHA_FILE) $(BUILD_DATE_FILE)
 
 # clean auxiliary profiling files
 profileclean:
@@ -1131,9 +1140,11 @@ config-sanity: net
 $(EXE): $(OBJS)
 	+$(CXX) -o $@ $(OBJS) $(LDFLAGS)
 
-# Force recompilation to ensure version info is up-to-date
-misc.o: FORCE
-FORCE:
+%.o: %.cpp
+	$(strip $(CXX) $(CPPFLAGS) $(CXXFLAGS)) -c -o $@ $<
+
+misc.o: misc.cpp $(BUILD_SHA_FILE) $(BUILD_DATE_FILE)
+	$(strip $(CXX) $(CPPFLAGS) $(CXXFLAGS) $(if $(GIT_SHA),-DGIT_SHA=$(GIT_SHA)) $(if $(GIT_DATE),-DGIT_DATE=$(GIT_DATE))) -c -o $@ $<
 
 clang-profile-make:
 	$(MAKE) ARCH=$(ARCH) COMP=$(COMP) \
