@@ -266,11 +266,17 @@ class MultiArray {
     using reverse_iterator       = typename ArrayType::reverse_iterator;
     using const_reverse_iterator = typename ArrayType::const_reverse_iterator;
 
-    constexpr auto&       at(size_type index) noexcept { return data_.at(index); }
-    constexpr const auto& at(size_type index) const noexcept { return data_.at(index); }
+    constexpr auto&       at(size_type index) { return data_.at(index); }
+    constexpr const auto& at(size_type index) const { return data_.at(index); }
 
-    constexpr auto&       operator[](size_type index) noexcept { return data_[index]; }
-    constexpr const auto& operator[](size_type index) const noexcept { return data_[index]; }
+    constexpr auto& operator[](size_type index) noexcept {
+        assert(index < Size);
+        return data_[index];
+    }
+    constexpr const auto& operator[](size_type index) const noexcept {
+        assert(index < Size);
+        return data_[index];
+    }
 
     constexpr auto&       front() noexcept { return data_.front(); }
     constexpr const auto& front() const noexcept { return data_.front(); }
@@ -371,6 +377,12 @@ inline uint64_t mul_hi64(uint64_t a, uint64_t b) {
     uint64_t c3 = aL * bH + uint32_t(c2);
     return aH * bH + (c2 >> 32) + (c3 >> 32);
 #endif
+}
+
+template<typename T1, typename T2>
+inline constexpr T2 interpolate(T1 x, T1 x0, T1 x1, T2 y0, T2 y1) {
+    assert(x0 != x1);
+    return T2(y0 + (y1 - y0) * (x - x0) / (x1 - x0));
 }
 
 uint64_t hash_bytes(const char*, size_t);
