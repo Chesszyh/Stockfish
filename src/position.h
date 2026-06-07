@@ -29,6 +29,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "attacks.h"
 #include "bitboard.h"
 #include "types.h"
 
@@ -195,8 +196,9 @@ class Position {
     void set_check_info() const;
 
     // Other helpers
-    template<bool PutPiece, bool ComputeRay = true>
+    template<bool ComputeRay = true>
     void update_piece_threats(Piece               pc,
+                              bool                putPiece,
                               Square              s,
                               DirtyThreats* const dts,
                               Bitboard            noRaysContaining = -1ULL) const;
@@ -300,7 +302,7 @@ inline Bitboard Position::attacks_by(Color c) const {
         Bitboard threats   = 0;
         Bitboard attackers = pieces(c, Pt);
         while (attackers)
-            threats |= attacks_bb<Pt>(pop_lsb(attackers), pieces());
+            threats |= Attacks::attacks_bb<Pt>(pop_lsb(attackers), pieces());
         return threats;
     }
 }
@@ -362,14 +364,14 @@ inline void Position::put_piece(Piece pc, Square s, DirtyThreats* const dts) {
     pieceCount[make_piece(color_of(pc), ALL_PIECES)]++;
 
     if (dts)
-        update_piece_threats<true>(pc, s, dts);
+        update_piece_threats(pc, true, s, dts);
 }
 
 inline void Position::remove_piece(Square s, DirtyThreats* const dts) {
     Piece pc = board[s];
 
     if (dts)
-        update_piece_threats<false>(pc, s, dts);
+        update_piece_threats(pc, false, s, dts);
 
     byTypeBB[ALL_PIECES] ^= s;
     byTypeBB[type_of(pc)] ^= s;
@@ -384,7 +386,7 @@ inline void Position::move_piece(Square from, Square to, DirtyThreats* const dts
     Bitboard fromTo = from | to;
 
     if (dts)
-        update_piece_threats<false>(pc, from, dts, fromTo);
+        update_piece_threats(pc, false, from, dts, fromTo);
 
     byTypeBB[ALL_PIECES] ^= fromTo;
     byTypeBB[type_of(pc)] ^= fromTo;
@@ -393,7 +395,7 @@ inline void Position::move_piece(Square from, Square to, DirtyThreats* const dts
     board[to]   = pc;
 
     if (dts)
-        update_piece_threats<true>(pc, to, dts, fromTo);
+        update_piece_threats(pc, true, to, dts, fromTo);
 }
 
 inline void Position::swap_piece(Square s, Piece pc, DirtyThreats* const dts) {
@@ -402,12 +404,12 @@ inline void Position::swap_piece(Square s, Piece pc, DirtyThreats* const dts) {
     remove_piece(s);
 
     if (dts)
-        update_piece_threats<false, false>(old, s, dts);
+        update_piece_threats<false>(old, false, s, dts);
 
     put_piece(pc, s);
 
     if (dts)
-        update_piece_threats<true, false>(pc, s, dts);
+        update_piece_threats<false>(pc, true, s, dts);
 }
 
 inline void Position::do_move(Move m, StateInfo& newSt, const TranspositionTable* tt = nullptr) {

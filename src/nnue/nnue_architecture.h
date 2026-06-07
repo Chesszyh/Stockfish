@@ -32,6 +32,7 @@
 #include "layers/clipped_relu.h"
 #include "layers/sqr_clipped_relu.h"
 #include "nnue_common.h"
+#include "nnz_helper.h"
 
 namespace Stockfish::Eval::NNUE {
 
@@ -40,13 +41,9 @@ using ThreatFeatureSet = Features::FullThreats;
 using PSQFeatureSet    = Features::HalfKAv2_hm;
 
 // Number of input feature dimensions after conversion
-constexpr IndexType TransformedFeatureDimensionsBig = 1024;
-constexpr int       L2Big                           = 31;
-constexpr int       L3Big                           = 32;
-
-constexpr IndexType TransformedFeatureDimensionsSmall = 128;
-constexpr int       L2Small                           = 15;
-constexpr int       L3Small                           = 32;
+constexpr IndexType L1 = 1024;
+constexpr int       L2 = 31;
+constexpr int       L3 = 32;
 
 constexpr IndexType PSQTBuckets = 8;
 constexpr IndexType LayerStacks = 8;
@@ -57,17 +54,16 @@ constexpr IndexType LayerStacks = 8;
 static_assert(PSQTBuckets % 8 == 0,
               "Per feature PSQT values cannot be processed at granularity lower than 8 at a time.");
 
-template<IndexType L1, int L2, int L3>
 struct NetworkArchitecture {
     static constexpr IndexType TransformedFeatureDimensions = L1;
     static constexpr int       FC_0_OUTPUTS                 = L2;
     static constexpr int       FC_1_OUTPUTS                 = L3;
 
     Layers::AffineTransformSparseInput<TransformedFeatureDimensions, FC_0_OUTPUTS + 1> fc_0;
-    Layers::SqrClippedReLU<FC_0_OUTPUTS + 1>                                           ac_sqr_0;
-    Layers::ClippedReLU<FC_0_OUTPUTS + 1>                                              ac_0;
+    Layers::SqrClippedReLU<FC_0_OUTPUTS + 1, WeightScaleBits + 1>                      ac_sqr_0;
+    Layers::ClippedReLU<FC_0_OUTPUTS + 1, WeightScaleBits + 1>                         ac_0;
     Layers::AffineTransform<FC_0_OUTPUTS * 2, FC_1_OUTPUTS>                            fc_1;
-    Layers::ClippedReLU<FC_1_OUTPUTS>                                                  ac_1;
+    Layers::ClippedReLU<FC_1_OUTPUTS, WeightScaleBits>                                 ac_1;
     Layers::AffineTransform<FC_1_OUTPUTS, 1>                                           fc_2;
 
     // Hash value embedded in the evaluation file
@@ -77,6 +73,8 @@ struct NetworkArchitecture {
         hashValue ^= TransformedFeatureDimensions * 2;
 
         hashValue = decltype(fc_0)::get_hash_value(hashValue);
+        // TODO: considerincluding hash value of ac_sqr_0 in the overall hash value.
+        // For now omitted on purpose because hash value is not written by trainer yet
         hashValue = decltype(ac_0)::get_hash_value(hashValue);
         hashValue = decltype(fc_1)::get_hash_value(hashValue);
         hashValue = decltype(ac_1)::get_hash_value(hashValue);
@@ -99,7 +97,8 @@ struct NetworkArchitecture {
             && fc_2.write_parameters(stream);
     }
 
-    std::int32_t propagate(const TransformedFeatureType* transformedFeatures) const {
+    std::int32_t propagate(const TransformedFeatureType* transformedFeatures,
+                           const NNZInfo<L1>&            nnzInfo) const {
         struct alignas(CacheLineSize) Buffer {
             alignas(CacheLineSize) typename decltype(fc_0)::OutputBuffer fc_0_out;
             alignas(CacheLineSize) typename decltype(ac_sqr_0)::OutputType
@@ -114,7 +113,7 @@ struct NetworkArchitecture {
 
         Buffer buffer;
 
-        fc_0.propagate(transformedFeatures, buffer.fc_0_out);
+        fc_0.propagate(transformedFeatures, buffer.fc_0_out, nnzInfo);
         ac_sqr_0.propagate(buffer.fc_0_out, buffer.ac_sqr_0_out);
         ac_0.propagate(buffer.fc_0_out, buffer.ac_0_out);
         std::memcpy(buffer.ac_sqr_0_out + FC_0_OUTPUTS, buffer.ac_0_out,
@@ -123,12 +122,20 @@ struct NetworkArchitecture {
         ac_1.propagate(buffer.fc_1_out, buffer.ac_1_out);
         fc_2.propagate(buffer.ac_1_out, buffer.fc_2_out);
 
-        // buffer.fc_0_out[FC_0_OUTPUTS] is such that 1.0 is equal to 127*(1<<WeightScaleBits) in
+        // max value for fwdOut is (L1 + L3) * HiddenMaxVal * WeightMaxVal
+        // for int8 activations and weights this is (L1 + L3) * 16129 making
+        // fwdOut safe from overflow until (L1 + L3) > 133,144
+        // first layer and last layer use WeightScaleBits + 1
+        std::int32_t fwdOut = buffer.fc_2_out[0] + buffer.fc_0_out[FC_0_OUTPUTS];
+        // fwdOut is such that 1.0 is equal to HiddenOneVal*(1<<WeightScaleBits)*2 in
         // quantized form, but we want 1.0 to be equal to 600*OutputScale
-        std::int32_t fwdOut =
-          (buffer.fc_0_out[FC_0_OUTPUTS]) * (600 * OutputScale) / (127 * (1 << WeightScaleBits));
-        std::int32_t outputValue = buffer.fc_2_out[0] + fwdOut;
+        // to make overflow impossible we cast to int64_t
+        constexpr std::int64_t multiplier  = 600 * OutputScale;
+        constexpr std::int64_t denominator = static_cast<std::int64_t>(HiddenOneVal)
+                                           * static_cast<std::int64_t>(1U << WeightScaleBits) * 2;
 
+        std::int32_t outputValue =
+          static_cast<std::int32_t>((static_cast<std::int64_t>(fwdOut) * multiplier) / denominator);
         return outputValue;
     }
 
@@ -147,10 +154,9 @@ struct NetworkArchitecture {
 
 }  // namespace Stockfish::Eval::NNUE
 
-template<Stockfish::Eval::NNUE::IndexType L1, int L2, int L3>
-struct std::hash<Stockfish::Eval::NNUE::NetworkArchitecture<L1, L2, L3>> {
-    std::size_t
-    operator()(const Stockfish::Eval::NNUE::NetworkArchitecture<L1, L2, L3>& arch) const noexcept {
+template<>
+struct std::hash<Stockfish::Eval::NNUE::NetworkArchitecture> {
+    std::size_t operator()(const Stockfish::Eval::NNUE::NetworkArchitecture& arch) const noexcept {
         return arch.get_content_hash();
     }
 };

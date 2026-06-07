@@ -42,6 +42,13 @@
 #elif defined(USE_SSE2)
     #include <emmintrin.h>
 
+#elif defined(USE_LASX)
+    #include <lasxintrin.h>
+    #include <lsxintrin.h>
+
+#elif defined(USE_LSX)
+    #include <lsxintrin.h>
+
 #elif defined(USE_NEON)
     #include <arm_neon.h>
 #endif
@@ -55,11 +62,15 @@ using PSQTWeightType   = std::int32_t;
 using IndexType        = std::uint32_t;
 
 // Version of the evaluation file
-constexpr std::uint32_t Version = 0x7AF32F20u;
+constexpr std::uint32_t Version = 0x6A448AFAu;
 
 // Constant used in evaluation value calculation
 constexpr int OutputScale     = 16;
 constexpr int WeightScaleBits = 6;
+constexpr int FtOneVal        = 256;
+constexpr int FtMaxVal        = 255;
+constexpr int HiddenOneVal    = 128;
+constexpr int HiddenMaxVal    = 127;
 
 // Size of cache line (in bytes)
 constexpr std::size_t CacheLineSize = 64;
@@ -71,10 +82,16 @@ constexpr const std::size_t Leb128MagicStringSize = sizeof(Leb128MagicString) - 
 #if defined(USE_AVX2)
 constexpr std::size_t SimdWidth = 32;
 
+#elif defined(USE_LASX)
+constexpr std::size_t SimdWidth = 32;
+
 #elif defined(USE_SSE2)
 constexpr std::size_t SimdWidth = 16;
 
 #elif defined(USE_NEON)
+constexpr std::size_t SimdWidth = 16;
+
+#elif defined(USE_LSX)
 constexpr std::size_t SimdWidth = 16;
 #endif
 
