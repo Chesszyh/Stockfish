@@ -56,7 +56,7 @@ enum Stages {
     QCAPTURE
 };
 
-#ifdef USE_AVX512ICL
+#ifdef USE_AVX512
 // Load the Move, and the ExtMove value, into all lanes of 512-bit registers
 static void splat_extmove(const ExtMove& m, __m512i& move, __m512i& value) {
     move  = _mm512_set1_epi32(m.raw());
@@ -81,20 +81,20 @@ struct MoveSorter {
 
         // Mask of all elements except the insertion point
         assert(m.value != std::numeric_limits<int>::min());
-        const uint16_t expand = _kadd_mask16(_mm512_cmplt_epi32_mask(sortedValues, value), -1);
+        const u16 expand = _kadd_mask16(_mm512_cmplt_epi32_mask(sortedValues, value), -1);
 
         sortedValues = _mm512_mask_expand_epi32(value, expand, sortedValues);
         sortedMoves  = _mm512_mask_expand_epi32(move, expand, sortedMoves);
     }
 
-    void write_sorted(ExtMove* moves, std::ptrdiff_t count) const {
+    void write_sorted(ExtMove* moves, isize count) const {
         static_assert(sizeof(ExtMove) == 8);
         assert(count <= MAX_ELEMENTS);
 
         // Because values and moves are stored separately, we need to reassemble the ExtMoves
         auto write = [&](int offset, const __m512i indices) {
             const __m512i extMoves = _mm512_permutex2var_epi32(sortedMoves, indices, sortedValues);
-            const std::ptrdiff_t storeCount = count - offset;
+            const isize   storeCount = count - offset;
 
             if (storeCount > 0)
                 _mm512_mask_storeu_epi64(moves + offset, (1 << storeCount) - 1, extMoves);
@@ -111,7 +111,7 @@ struct MoveSorter {
 void partial_insertion_sort(ExtMove* begin, ExtMove* end, int limit) {
     ExtMove *sortedEnd = begin, *p = begin + 1;
 
-#ifdef USE_AVX512ICL
+#ifdef USE_AVX512
     if (begin == end)
         return;
 

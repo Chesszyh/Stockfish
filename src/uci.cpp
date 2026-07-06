@@ -21,12 +21,12 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
-#include <cstdint>
 #include <cstdlib>
 #include <iterator>
 #include <optional>
 #include <sstream>
 #include <string_view>
+#include <filesystem>
 #include <utility>
 #include <vector>
 
@@ -64,9 +64,9 @@ void UCIEngine::print_info_string(std::string_view str) {
     sync_cout_end();
 }
 
-UCIEngine::UCIEngine(int argc, char** argv) :
-    engine(argv[0]),
-    cli(argc, argv) {
+UCIEngine::UCIEngine(CommandLine cli_) :
+    engine(cli_.argc > 0 ? std::optional{path_from_utf8(cli_.argv[0])} : std::nullopt),
+    cli(std::move(cli_)) {
 
     engine.get_options().add_info_listener([](const std::optional<std::string>& str) {
         if (str.has_value())
@@ -86,6 +86,7 @@ void UCIEngine::init_search_update_listeners() {
 }
 
 void UCIEngine::loop() {
+    set_console_utf8();
     std::string token, cmd;
 
     for (int i = 1; i < cli.argc; ++i)
@@ -152,10 +153,11 @@ void UCIEngine::loop() {
             sync_cout << compiler_info() << sync_endl;
         else if (token == "export_net")
         {
-            std::pair<std::optional<std::string>, std::string> file;
+            std::optional<std::filesystem::path> file;
+            std::string                          filename;
 
-            if (is >> file.second)
-                file.first = file.second;
+            if (is >> filename)
+                file = path_from_utf8(filename);
 
             engine.save_network(file);
         }
@@ -172,7 +174,7 @@ void UCIEngine::loop() {
             sync_cout << "Unknown command: '" << cmd << "'. Type help for more information."
                       << sync_endl;
 
-    } while (token != "quit" && cli.argc == 1);  // The command-line arguments are one-shot
+    } while (token != "quit" && cli.argc <= 1);  // The command-line arguments are one-shot
 }
 
 Search::LimitsType UCIEngine::parse_limits(std::istream& is) {
@@ -226,8 +228,8 @@ void UCIEngine::go(std::istringstream& is) {
 
 void UCIEngine::bench(std::istream& args) {
     std::string token;
-    uint64_t    num, nodes = 0, cnt = 1;
-    uint64_t    nodesSearched = 0;
+    u64         num, nodes = 0, cnt = 1;
+    u64         nodesSearched = 0;
     const auto& options       = engine.get_options();
 
     engine.set_on_update_full([&](const auto& i) {
@@ -298,8 +300,8 @@ void UCIEngine::benchmark(std::istream& args) {
     static constexpr int NUM_WARMUP_POSITIONS = 3;
 
     std::string token;
-    uint64_t    nodes = 0, cnt = 1;
-    uint64_t    nodesSearched = 0;
+    u64         nodes = 0, cnt = 1;
+    u64         nodesSearched = 0;
 
     engine.set_on_update_full([&](const Engine::InfoFull& i) { nodesSearched = i.nodes; });
 
@@ -456,7 +458,7 @@ void UCIEngine::setoption(std::istringstream& is) {
     engine.get_options().setoption(is);
 }
 
-std::uint64_t UCIEngine::perft(const Search::LimitsType& limits) {
+u64 UCIEngine::perft(const Search::LimitsType& limits) {
     auto nodes = engine.perft(engine.fen(), limits.perft, engine.get_options()["UCI_Chess960"]);
     sync_cout << "\nNodes searched: " << nodes << "\n" << sync_endl;
     return nodes;

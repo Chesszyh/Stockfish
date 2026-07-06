@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <filesystem>
 #include <deque>
 #include <iosfwd>
 #include <memory>
@@ -33,7 +34,6 @@
 #include "misc.h"
 #include "nnue/network.h"
 #include "nnue/nnue_common.h"
-#include "nnue/nnue_misc.h"
 #include "numa.h"
 #include "perft.h"
 #include "position.h"
@@ -57,18 +57,19 @@ int           MaxThreads = std::max(1024, 4 * int(get_hardware_concurrency()));
 // PR#6526). The user can always explicitly override this behavior.
 constexpr NumaAutoPolicy DefaultNumaPolicy = BundledL3Policy{32};
 
-Engine::Engine(std::optional<std::string> path) :
-    binaryDirectory(path ? CommandLine::get_binary_directory(*path) : ""),
+Engine::Engine(std::optional<std::filesystem::path> path) :
+    binaryDirectory(path ? CommandLine::get_binary_directory(*path) : std::filesystem::path{}),
     numaContext(NumaConfig::from_system(DefaultNumaPolicy)),
     states(new std::deque<StateInfo>(1)),
     threads(),
-    network(numaContext, get_default_network()) {
+    networkFile{std::nullopt, ""},
+    network(numaContext) {
 
     pos.set(StartFEN, false, &states->back());
 
     options.add(  //
       "Debug Log File", Option("", [](const Option& o) {
-          start_logger(o);
+          start_logger(path_from_utf8(std::string(o)));
           return std::nullopt;
       }));
 
@@ -133,16 +134,17 @@ Engine::Engine(std::optional<std::string> path) :
 
     options.add(  //
       "EvalFile", Option(EvalFileDefaultName, [this](const Option& o) {
-          load_network(o);
+          load_network(path_from_utf8(std::string(o)));
           return std::nullopt;
       }));
 
+    network = get_default_network();
     threads.clear();
     threads.ensure_network_replicated();
     resize_threads();
 }
 
-std::uint64_t Engine::perft(const std::string& fen, Depth depth, bool isChess960) {
+u64 Engine::perft(const std::string& fen, Depth depth, bool isChess960) {
     verify_network();
 
     return Benchmark::perft(fen, depth, isChess960);
@@ -246,7 +248,7 @@ void Engine::resize_threads() {
     threads.ensure_network_replicated();
 }
 
-void Engine::set_tt_size(size_t mb) {
+void Engine::set_tt_size(usize mb) {
     wait_for_search_finished();
     tt.resize(mb, threads);
 }
@@ -256,10 +258,11 @@ void Engine::set_ponderhit(bool b) { threads.main_manager()->ponder = b; }
 // network related
 
 void Engine::verify_network() const {
-    network->verify(options["EvalFile"], onVerifyNetwork);
+    const auto file = path_from_utf8(std::string(options["EvalFile"]));
+    network->verify(onVerifyNetwork, networkFile, file);
 
     auto statuses = network.get_status_and_errors();
-    for (size_t i = 0; i < statuses.size(); ++i)
+    for (usize i = 0; i < statuses.size(); ++i)
     {
         const auto [status, error] = statuses[i];
         std::string message        = "Network replica " + std::to_string(i + 1) + ": ";
@@ -289,24 +292,25 @@ void Engine::verify_network() const {
     }
 }
 
-std::unique_ptr<Eval::NNUE::Network> Engine::get_default_network() const {
+std::unique_ptr<Eval::NNUE::Network> Engine::get_default_network() {
 
-    auto network_ = std::make_unique<NN::Network>(NN::EvalFile{EvalFileDefaultName, "None", ""});
+    auto network_ = std::make_unique<NN::Network>();
 
-    network_->load(binaryDirectory, "");
+    network_->load(binaryDirectory, std::filesystem::path{}, networkFile);
 
     return network_;
 }
 
-void Engine::load_network(const std::string& file) {
+void Engine::load_network(const std::filesystem::path& file) {
     network.modify_and_replicate(
-      [this, &file](NN::Network& network_) { network_.load(binaryDirectory, file); });
+      [this, &file](NN::Network& network_) { network_.load(binaryDirectory, file, networkFile); });
     threads.clear();
     threads.ensure_network_replicated();
 }
 
-void Engine::save_network(const std::pair<std::optional<std::string>, std::string> file) {
-    network.modify_and_replicate([&file](NN::Network& network_) { network_.save(file.first); });
+void Engine::save_network(const std::optional<std::filesystem::path>& file) {
+    network.modify_and_replicate(
+      [&file, this](NN::Network& network_) { network_.save(networkFile, file); });
 }
 
 // utility functions
@@ -336,11 +340,11 @@ std::string Engine::visualize() const {
 
 int Engine::get_hashfull(int maxAge) const { return tt.hashfull(maxAge); }
 
-std::vector<std::pair<size_t, size_t>> Engine::get_bound_thread_count_by_numa_node() const {
-    auto                                   counts = threads.get_bound_thread_count_by_numa_node();
-    const NumaConfig&                      cfg    = numaContext.get_numa_config();
-    std::vector<std::pair<size_t, size_t>> ratios;
-    NumaIndex                              n = 0;
+std::vector<std::pair<usize, usize>> Engine::get_bound_thread_count_by_numa_node() const {
+    auto                                 counts = threads.get_bound_thread_count_by_numa_node();
+    const NumaConfig&                    cfg    = numaContext.get_numa_config();
+    std::vector<std::pair<usize, usize>> ratios;
+    NumaIndex                            n = 0;
     for (; n < counts.size(); ++n)
         ratios.emplace_back(counts[n], cfg.num_cpus_in_numa_node(n));
     if (!counts.empty())
@@ -380,7 +384,7 @@ std::string Engine::thread_binding_information_as_string() const {
 std::string Engine::thread_allocation_information_as_string() const {
     std::stringstream ss;
 
-    size_t threadsSize = threads.size();
+    usize threadsSize = threads.size();
     ss << "Using " << threadsSize << (threadsSize > 1 ? " threads" : " thread");
 
     auto boundThreadsByNodeStr = thread_binding_information_as_string();

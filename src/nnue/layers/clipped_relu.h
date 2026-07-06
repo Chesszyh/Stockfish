@@ -34,8 +34,8 @@ template<IndexType InDims, int WeightScaleBitsLocal = WeightScaleBits>
 class ClippedReLU {
    public:
     // Input/output type
-    using InputType  = std::int32_t;
-    using OutputType = std::uint8_t;
+    using InputType  = i32;
+    using OutputType = u8;
 
     // Number of input/output dimensions
     static constexpr IndexType InputDimensions  = InDims;
@@ -46,8 +46,8 @@ class ClippedReLU {
     using OutputBuffer = OutputType[PaddedOutputDimensions];
 
     // Hash value embedded in the evaluation file
-    static constexpr std::uint32_t get_hash_value(std::uint32_t prevHash) {
-        std::uint32_t hashValue = 0x538D24C7u;
+    static constexpr u32 get_hash_value(u32 prevHash) {
+        u32 hashValue = 0x538D24C7u;
         hashValue += prevHash;
         // TODO: consider including WeightScaleBitsLocal in the hash value.
         // For now omitted on purpose because not written by trainer (yet)
@@ -60,8 +60,8 @@ class ClippedReLU {
     // Write network parameters
     bool write_parameters(std::ostream&) const { return true; }
 
-    std::size_t get_content_hash() const {
-        std::size_t h = 0;
+    usize get_content_hash() const {
+        usize h = 0;
         hash_combine(h, get_hash_value(0));
         return h;
     }
@@ -146,6 +146,24 @@ class ClippedReLU {
             out[i]                = __lsx_vssrani_b_h(words1, words0, 0);
         }
         constexpr IndexType Start = NumChunks * 16;
+
+#elif defined(USE_RVV)
+
+        for (usize j = 0; j < InputDimensions;)
+        {
+            usize vl = __riscv_vsetvl_e32m4(InputDimensions - j);
+
+            vint32m4_t in = __riscv_vle32_v_i32m4(&input[j], vl);
+            in            = __riscv_vmax_vx_i32m4(in, 0, vl);
+
+            vint16m2_t words =
+              __riscv_vnclip_wx_i16m2(in, WeightScaleBitsLocal, __RISCV_VXRM_RDN, vl);
+            vint8m1_t narrowed = __riscv_vnclip_wx_i8m1(words, 0, __RISCV_VXRM_RDN, vl);
+
+            __riscv_vse8_v_u8m1(&output[j], __riscv_vreinterpret_v_i8m1_u8m1(narrowed), vl);
+            j += vl;
+        }
+        constexpr IndexType Start = InputDimensions;
 
 #else
         constexpr IndexType Start = 0;

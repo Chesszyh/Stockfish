@@ -19,9 +19,8 @@
 #ifndef ENGINE_H_INCLUDED
 #define ENGINE_H_INCLUDED
 
-#include <cstddef>
-#include <cstdint>
 #include <functional>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <optional>
@@ -30,8 +29,10 @@
 #include <utility>
 #include <vector>
 
+#include "misc.h"
 #include "history.h"
 #include "nnue/network.h"
+#include "nnue/nnue_misc.h"
 #include "numa.h"
 #include "position.h"
 #include "search.h"
@@ -48,7 +49,7 @@ class Engine {
     using InfoFull  = Search::InfoFull;
     using InfoIter  = Search::InfoIteration;
 
-    Engine(std::optional<std::string> path = std::nullopt);
+    Engine(std::optional<std::filesystem::path> path = std::nullopt);
 
     // Cannot be movable due to components holding backreferences to fields
     Engine(const Engine&)            = delete;
@@ -58,7 +59,7 @@ class Engine {
 
     ~Engine() { wait_for_search_finished(); }
 
-    std::uint64_t perft(const std::string& fen, Depth depth, bool isChess960);
+    u64 perft(const std::string& fen, Depth depth, bool isChess960);
 
     // non blocking call to start searching
     void go(Search::LimitsType&);
@@ -75,7 +76,7 @@ class Engine {
 
     void set_numa_config_from_option(const std::string& o);
     void resize_threads();
-    void set_tt_size(size_t mb);
+    void set_tt_size(usize mb);
     void set_ponderhit(bool);
     void search_clear();
 
@@ -88,9 +89,9 @@ class Engine {
     // network related
 
     void                                 verify_network() const;
-    std::unique_ptr<Eval::NNUE::Network> get_default_network() const;
-    void                                 load_network(const std::string& file);
-    void save_network(std::pair<std::optional<std::string>, std::string> file);
+    std::unique_ptr<Eval::NNUE::Network> get_default_network();
+    void                                 load_network(const std::filesystem::path& file);
+    void save_network(const std::optional<std::filesystem::path>& file);
 
     // utility functions
 
@@ -101,17 +102,17 @@ class Engine {
 
     int get_hashfull(int maxAge = 0) const;
 
-    std::string                            fen() const;
-    void                                   flip();
-    std::string                            visualize() const;
-    std::vector<std::pair<size_t, size_t>> get_bound_thread_count_by_numa_node() const;
-    std::string                            get_numa_config_as_string() const;
-    std::string                            numa_config_information_as_string() const;
-    std::string                            thread_allocation_information_as_string() const;
-    std::string                            thread_binding_information_as_string() const;
+    std::string                          fen() const;
+    void                                 flip();
+    std::string                          visualize() const;
+    std::vector<std::pair<usize, usize>> get_bound_thread_count_by_numa_node() const;
+    std::string                          get_numa_config_as_string() const;
+    std::string                          numa_config_information_as_string() const;
+    std::string                          thread_allocation_information_as_string() const;
+    std::string                          thread_binding_information_as_string() const;
 
    private:
-    const std::string binaryDirectory;
+    const std::filesystem::path binaryDirectory;
 
     NumaReplicationContext numaContext;
 
@@ -121,6 +122,7 @@ class Engine {
     OptionsMap                                        options;
     ThreadPool                                        threads;
     TranspositionTable                                tt;
+    Eval::NNUE::EvalFile                              networkFile;
     LazyNumaReplicatedSystemWide<Eval::NNUE::Network> network;
 
     Search::SearchManager::UpdateContext  updateContext;
