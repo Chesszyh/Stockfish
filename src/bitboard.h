@@ -20,11 +20,10 @@
 #define BITBOARD_H_INCLUDED
 
 #include <algorithm>
+#include <array>
 #include <cassert>
-#include <cmath>
-#include <cstring>
-#include <cstdlib>
 #include <string>
+#include <type_traits>
 
 #include "types.h"
 #include "misc.h"
@@ -33,7 +32,6 @@ namespace Stockfish {
 
 namespace Bitboards {
 
-void        init();
 std::string pretty(Bitboard b);
 
 }  // namespace Stockfish::Bitboards
@@ -64,9 +62,6 @@ constexpr Bitboard Rank5BB = Rank1BB << (8 * 4);
 constexpr Bitboard Rank6BB = Rank1BB << (8 * 5);
 constexpr Bitboard Rank7BB = Rank1BB << (8 * 6);
 constexpr Bitboard Rank8BB = Rank1BB << (8 * 7);
-
-extern u8 PopCnt16[1 << 16];
-extern u8 SquareDistance[SQUARE_NB][SQUARE_NB];
 
 constexpr Bitboard square_bb(Square s) {
     assert(is_ok(s));
@@ -105,19 +100,18 @@ constexpr Bitboard file_bb(Square s) { return file_bb(file_of(s)); }
 
 
 // Moves a bitboard one or two steps as specified by the direction D
-template<Direction D>
-constexpr Bitboard shift(Bitboard b) {
-    return D == NORTH         ? b << 8
-         : D == SOUTH         ? b >> 8
-         : D == NORTH + NORTH ? b << 16
-         : D == SOUTH + SOUTH ? b >> 16
-         : D == EAST          ? (b & ~FileHBB) << 1
-         : D == WEST          ? (b & ~FileABB) >> 1
-         : D == NORTH_EAST    ? (b & ~FileHBB) << 9
-         : D == NORTH_WEST    ? (b & ~FileABB) << 7
-         : D == SOUTH_EAST    ? (b & ~FileHBB) >> 7
-         : D == SOUTH_WEST    ? (b & ~FileABB) >> 9
-                              : 0;
+inline constexpr Bitboard shift(Bitboard b, Direction dir) {
+    return dir == NORTH         ? b << 8
+         : dir == SOUTH         ? b >> 8
+         : dir == NORTH + NORTH ? b << 16
+         : dir == SOUTH + SOUTH ? b >> 16
+         : dir == EAST          ? (b & ~FileHBB) << 1
+         : dir == WEST          ? (b & ~FileABB) >> 1
+         : dir == NORTH_EAST    ? (b & ~FileHBB) << 9
+         : dir == NORTH_WEST    ? (b & ~FileABB) << 7
+         : dir == SOUTH_EAST    ? (b & ~FileHBB) >> 7
+         : dir == SOUTH_WEST    ? (b & ~FileABB) >> 9
+                                : 0;
 }
 
 
@@ -125,56 +119,62 @@ constexpr Bitboard shift(Bitboard b) {
 // from the squares in the given bitboard.
 template<Color C>
 constexpr Bitboard pawn_attacks_bb(Bitboard b) {
-    return C == WHITE ? shift<NORTH_WEST>(b) | shift<NORTH_EAST>(b)
-                      : shift<SOUTH_WEST>(b) | shift<SOUTH_EAST>(b);
+    return C == WHITE ? shift(b, NORTH_WEST) | shift(b, NORTH_EAST)
+                      : shift(b, SOUTH_WEST) | shift(b, SOUTH_EAST);
 }
 
 constexpr Bitboard pawn_single_push_bb(Color c, Bitboard b) {
-    return c == WHITE ? shift<NORTH>(b) : shift<SOUTH>(b);
+    return shift(b, c == WHITE ? NORTH : SOUTH);
 }
 
-// distance() functions return the distance between x and y, defined as the
-// number of steps for a king in x to reach y.
+inline constexpr auto PawnPairBB = []() {
+    std::array<Bitboard, SQUARE_NB> result{};
+    for (Square s = SQ_A1; s <= SQ_H8; ++s)
+    {
+        Bitboard file  = file_bb(s);
+        Bitboard files = file | shift(file, EAST) | shift(file, WEST);
+        result[s]      = files & ~(Rank1BB | Rank8BB) & ~square_bb(s);
+    }
+    return result;
+}();
 
-template<typename T1 = Square>
-inline int distance(Square x, Square y);
+// Returns the squares that can host a pawn forming a "pawn pair" with a pawn
+// on s: own file plus adjacent files, restricted to ranks 2-7, excluding s.
+// The geometry is color-independent.
+constexpr Bitboard pawn_pair_bb(Square s) { return PawnPairBB[s]; }
 
-template<>
-inline int distance<File>(Square x, Square y) {
-    return std::abs(file_of(x) - file_of(y));
-}
+constexpr int edge_distance(File f) { return std::min(f, File(FILE_H - f)); }
 
-template<>
-inline int distance<Rank>(Square x, Square y) {
-    return std::abs(rank_of(x) - rank_of(y));
-}
+template<typename T>
+constexpr int constexpr_popcount(T v) {
+    static_assert(std::is_integral_v<T>, "constexpr_popcount is undefined for non-integral types");
 
-template<>
-inline int distance<Square>(Square x, Square y) {
-    return SquareDistance[x][y];
-}
+    if constexpr (sizeof(T) <= 8)
+    {
+        u64 b = static_cast<std::make_unsigned_t<T>>(v);
 
-inline int edge_distance(File f) { return std::min(f, File(FILE_H - f)); }
+        b = b - ((b >> 1) & 0x5555555555555555ULL);
+        b = (b & 0x3333333333333333ULL) + ((b >> 2) & 0x3333333333333333ULL);
+        b = (b + (b >> 4)) & 0x0F0F0F0F0F0F0F0FULL;
 
+        return static_cast<int>((b * 0x0101010101010101ULL) >> 56);
+    }
+    else
+    {
+        int result = 0;
 
-constexpr int constexpr_popcount(Bitboard b) {
-    b = b - ((b >> 1) & 0x5555555555555555ULL);
-    b = (b & 0x3333333333333333ULL) + ((b >> 2) & 0x3333333333333333ULL);
-    b = (b + (b >> 4)) & 0x0F0F0F0F0F0F0F0FULL;
-    return static_cast<int>((b * 0x0101010101010101ULL) >> 56);
+        for (; v; v >>= static_cast<T>(1))
+            if (v & static_cast<T>(1))
+                ++result;
+
+        return result;
+    }
 }
 
 // Counts the number of non-zero bits in a bitboard.
 inline int popcount(Bitboard b) {
 
-#ifndef USE_POPCNT
-
-    u16 indices[4];
-    std::memcpy(indices, &b, sizeof(b));
-    return PopCnt16[indices[0]] + PopCnt16[indices[1]] + PopCnt16[indices[2]]
-         + PopCnt16[indices[3]];
-
-#elif defined(_MSC_VER)
+#ifdef _MSC_VER
 
     return int(_mm_popcnt_u64(b));
 

@@ -23,6 +23,7 @@
 #include <cassert>
 #include <cctype>
 #include <cstring>
+#include <cerrno>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -155,6 +156,10 @@ std::string engine_version_info() {
         date >> month >> day >> year;
         ss << year << std::setw(2) << std::setfill('0') << (1 + months.find(month) / 4)
            << std::setw(2) << std::setfill('0') << day;
+#endif
+
+#ifdef GIT_DIFFINDEX
+        ss << "-m";
 #endif
 
         ss << "-";
@@ -473,7 +478,7 @@ u64 hash_bytes(const char* data, usize size) {
     {
         u64 k = 0;
         for (int i = (size & 7) - 1; i >= 0; i--)
-            k = (k << 8) | u64(end[i]);
+            k = (k << 8) | u8(end[i]);
 
         h ^= k;
         h *= m;
@@ -543,10 +548,15 @@ CommandLine::CommandLine(int _argc, char** _argv) :
 }
 
 
-usize str_to_size_t(const std::string& s) {
-    unsigned long long value = std::stoull(s);
-    if (value > std::numeric_limits<usize>::max())
-        std::exit(EXIT_FAILURE);
+std::optional<usize> str_to_size_t(const std::string& s) {
+    if (s.empty() || s[0] == '-')
+        return std::nullopt;
+    errno                           = 0;
+    char*                    endptr = nullptr;
+    const unsigned long long value  = std::strtoull(s.c_str(), &endptr, 10);
+    if (errno == ERANGE || (*endptr != '\0' && !std::isspace(*endptr))
+        || value > std::numeric_limits<usize>::max())
+        return std::nullopt;
     return static_cast<usize>(value);
 }
 
@@ -568,12 +578,15 @@ bool is_whitespace(std::string_view s) {
 fs::path CommandLine::get_binary_directory(fs::path argv0) {
 
 #ifdef _WIN32
-    #ifdef _MSC_VER
-    // Prefer the executable path reported by the CRT when available.
-    wchar_t* pgmptr = nullptr;
-    if (!_get_wpgmptr(&pgmptr) && pgmptr != nullptr && *pgmptr)
-        argv0 = fs::path(pgmptr);
-    #endif
+    // Prefer the executable path reported by Windows. Unlike _get_wpgmptr,
+    // this does not depend on whether the CRT used a narrow or wide entry
+    // point. Windows paths cannot exceed 32767 characters, so a fixed
+    // buffer is always sufficient. Falls back to argv0 if the API fails.
+    constexpr DWORD MaxPath = 32768;
+    wchar_t         path[MaxPath];
+
+    if (const DWORD length = GetModuleFileNameW(nullptr, path, MaxPath))
+        argv0 = fs::path(path, path + length);
 #endif
 
     auto binaryDirectory = argv0.parent_path();

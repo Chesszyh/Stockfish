@@ -22,6 +22,7 @@
 #include <cassert>
 #include <array>
 #include <initializer_list>
+#include <utility>
 
 #include "types.h"
 #include "bitboard.h"
@@ -102,10 +103,11 @@ struct alignas(32) DualMagic {
     //
     // When using hyperbola quintessence, file, diagonal and antidiagonal attacks
     // can use a byte reversal rather than a full bit reversal (because all squares
-    // reside in different bytes). Rank atttacks cannot. Thus, for rank attacks
-    // only, we use a compact lookup table indexed by the 8 bits of the rank's occupancy.
+    // reside in different bytes). Rank attacks cannot. Thus, for rank attacks
+    // only, we use a compact lookup table indexed by the 6 inner bits of the rank's
+    // occupancy (the edge squares never affect the attack set).
     std::pair<Bitboard, Bitboard> both_attacks_bb(Bitboard occupied) const {
-        // Byteswap within 64-bit elements
+        // Byteswap within 128-bit elements
         const auto bswap = [](__m256i v) {
             return _mm256_shuffle_epi8(v, _mm256_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
                                                           13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
@@ -127,7 +129,7 @@ struct alignas(32) DualMagic {
         __m128i rookBishop =
           _mm_or_si128(_mm256_extracti128_si256(result, 1), _mm256_castsi256_si128(result));
 
-        Bitboard rowOccupancy = rankAttacksLookup[(occupied >> shift) & 0xff];
+        Bitboard rowOccupancy = rankAttacksLookup[(occupied >> (shift + 1)) & 0x3f];
         Bitboard rankAttacks  = rowOccupancy << shift;
 
         // [bishop, rook]
@@ -135,7 +137,8 @@ struct alignas(32) DualMagic {
     }
 };
 
-const DualMagic& dual_magic(Square s);
+extern const std::array<DualMagic, SQUARE_NB> DualMagics;
+inline const DualMagic&                       dual_magic(Square s) { return DualMagics[s]; }
 
 #else
 // Magic holds all magic bitboards relevant data for a single square
@@ -164,9 +167,24 @@ const Magic& magic(Square s, PieceType pt);
 
 #endif
 
-Bitboard line_bb(Square s1, Square s2);
-Bitboard between_bb(Square s1, Square s2);
-Bitboard ray_pass_bb(Square s1, Square s2);
+extern Bitboard LineBB[SQUARE_NB][SQUARE_NB];
+extern Bitboard BetweenBB[SQUARE_NB][SQUARE_NB];
+extern Bitboard RayPassBB[SQUARE_NB][SQUARE_NB];
+
+inline Bitboard line_bb(Square s1, Square s2) {
+    assert(is_ok(s1) && is_ok(s2));
+    return LineBB[s1][s2];
+}
+
+inline Bitboard between_bb(Square s1, Square s2) {
+    assert(is_ok(s1) && is_ok(s2));
+    return BetweenBB[s1][s2];
+}
+
+inline Bitboard ray_pass_bb(Square s1, Square s2) {
+    assert(is_ok(s1) && is_ok(s2));
+    return RayPassBB[s1][s2];
+}
 
 // Returns the bitboard of target square for the given step
 // from the given square. If the step is off the board, returns empty bitboard.
@@ -177,23 +195,17 @@ constexpr Bitboard safe_destination(Square s, int step) {
 }
 
 constexpr Bitboard sliding_attack(PieceType pt, Square sq, Bitboard occupied) {
-    Bitboard            attacks = 0, dest = 0;
+    Bitboard            attacks             = 0;
     constexpr Direction RookDirections[4]   = {NORTH, SOUTH, EAST, WEST};
     constexpr Direction BishopDirections[4] = {NORTH_EAST, SOUTH_EAST, SOUTH_WEST, NORTH_WEST};
 
     for (Direction d : (pt == ROOK ? RookDirections : BishopDirections))
-    {
-        Square s = sq;
-        while ((dest = safe_destination(s, d)))
+        for (Square s = sq; Bitboard dest = safe_destination(s, d); s += d)
         {
             attacks |= dest;
-            s += d;
             if (occupied & dest)
-            {
                 break;
-            }
         }
-    }
 
     return attacks;
 }
@@ -270,14 +282,14 @@ inline Bitboard attacks_bb(Square s, Color c = COLOR_NB) {
 
 // Returns the attacks by the given piece
 // assuming the board is occupied according to the passed Bitboard.
-// Sliding piece attacks do not continue passed an occupied square.
+// Sliding piece attacks do not continue past an occupied square.
 template<PieceType Pt>
 inline Bitboard attacks_bb(Square s, Bitboard occupied) {
 
     assert(Pt != PAWN && is_ok(s));
 
 #ifdef USE_DUAL_HYPERBOLA_QUINT
-    const auto [bishop, rook] = dual_magic(s).both_attacks_bb(occupied);
+    [[maybe_unused]] const auto [bishop, rook] = dual_magic(s).both_attacks_bb(occupied);
 
     switch (Pt)
     {
@@ -304,9 +316,17 @@ inline Bitboard attacks_bb(Square s, Bitboard occupied) {
 #endif
 }
 
+inline std::pair<Bitboard, Bitboard> both_attacks_bb(Square s, Bitboard occupied) {
+#ifdef USE_DUAL_HYPERBOLA_QUINT
+    return dual_magic(s).both_attacks_bb(occupied);
+#else
+    return {attacks_bb<BISHOP>(s, occupied), attacks_bb<ROOK>(s, occupied)};
+#endif
+}
+
 // Returns the attacks by the given piece
 // assuming the board is occupied according to the passed Bitboard.
-// Sliding piece attacks do not continue passed an occupied square.
+// Sliding piece attacks do not continue past an occupied square.
 inline Bitboard attacks_bb(PieceType pt, Square s, Bitboard occupied) {
 
     assert(pt != PAWN && is_ok(s));
@@ -318,7 +338,7 @@ inline Bitboard attacks_bb(PieceType pt, Square s, Bitboard occupied) {
     case ROOK :
         return attacks_bb<ROOK>(s, occupied);
     case QUEEN :
-        return attacks_bb<BISHOP>(s, occupied) | attacks_bb<ROOK>(s, occupied);
+        return attacks_bb<QUEEN>(s, occupied);
     default :
         return PseudoAttacks[pt][s];
     }

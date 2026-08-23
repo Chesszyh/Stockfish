@@ -147,8 +147,7 @@ class Position {
     void do_move(Move                      m,
                  StateInfo&                newSt,
                  bool                      givesCheck,
-                 DirtyPiece&               dp,
-                 DirtyThreats&             dts,
+                 Dirties&                  dirties,
                  const TranspositionTable* tt,
                  const SharedHistories*    worker);
     void undo_move(Move m);
@@ -177,11 +176,12 @@ class Position {
     int   rule50_count() const;
     Value non_pawn_material(Color c) const;
     Value non_pawn_material() const;
+    bool  dtz_is_dtm() const;  // Pawnless && (3-men || 4-men-minors-only)
 
     // Position consistency check, for debugging
-    bool pos_is_ok() const;
-    bool material_key_is_ok() const;
-    void flip();
+    bool                            pos_is_ok() const;
+    bool                            material_key_is_ok() const;
+    std::optional<PositionSetError> flip();
 
     StateInfo* state() const;
 
@@ -220,16 +220,15 @@ class Position {
     std::array<Bitboard, PIECE_TYPE_NB> byTypeBB;
     std::array<Bitboard, COLOR_NB>      byColorBB;
 
-    int          pieceCount[PIECE_NB];
-    int          castlingRightsMask[SQUARE_NB];
-    Square       castlingRookSquare[CASTLING_RIGHT_NB];
-    Bitboard     castlingPath[CASTLING_RIGHT_NB];
-    StateInfo*   st;
-    int          gamePly;
-    Color        sideToMove;
-    bool         chess960;
-    DirtyPiece   scratch_dp;
-    DirtyThreats scratch_dts;
+    int        pieceCount[PIECE_NB];
+    int        castlingRightsMask[SQUARE_NB];
+    Square     castlingRookSquare[CASTLING_RIGHT_NB];
+    Bitboard   castlingPath[CASTLING_RIGHT_NB];
+    StateInfo* st;
+    int        gamePly;
+    Color      sideToMove;
+    bool       chess960;
+    Dirties    scratchDirties;
 };
 
 std::ostream& operator<<(std::ostream& os, const Position& pos);
@@ -344,6 +343,11 @@ inline int Position::rule50_count() const { return st->rule50; }
 
 inline bool Position::is_chess960() const { return chess960; }
 
+inline bool Position::dtz_is_dtm() const {
+    return !count<PAWN>()
+        && (count<ALL_PIECES>() == 3 || (count<ALL_PIECES>() == 4 && !pieces(QUEEN, ROOK)));
+}
+
 inline bool Position::capture(Move m) const {
     assert(m.is_ok());
 
@@ -431,8 +435,9 @@ inline void Position::swap_piece(Square s, Piece pc, DirtyThreats* const dts) {
 }
 
 inline void Position::do_move(Move m, StateInfo& newSt, const TranspositionTable* tt = nullptr) {
-    new (&scratch_dts) DirtyThreats;
-    do_move(m, newSt, gives_check(m), scratch_dp, scratch_dts, tt, nullptr);
+    new (&scratchDirties.dirtyThreats) DirtyThreats;
+    new (&scratchDirties.dirtyPawnPairs) DirtyPawnPairs;
+    do_move(m, newSt, gives_check(m), scratchDirties, tt, nullptr);
 }
 
 inline StateInfo* Position::state() const { return st; }

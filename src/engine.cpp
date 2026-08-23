@@ -48,8 +48,7 @@ namespace Stockfish {
 
 namespace NN = Eval::NNUE;
 
-constexpr int MaxHashMB  = Is64Bit ? 33554432 : 2048;
-int           MaxThreads = std::max(1024, 4 * int(get_hardware_concurrency()));
+int MaxThreads = std::max(1024, 4 * int(get_hardware_concurrency()));
 
 // The default configuration will attempt to group L3 domains up to 32 threads.
 // This size was found to be a good balance between the Elo gain of increased
@@ -63,7 +62,7 @@ Engine::Engine(std::optional<std::filesystem::path> path) :
     states(new std::deque<StateInfo>(1)),
     threads(),
     networkFile{std::nullopt, ""},
-    network(numaContext) {
+    network(numaContext, get_default_network()) {
 
     pos.set(StartFEN, false, &states->back());
 
@@ -75,7 +74,8 @@ Engine::Engine(std::optional<std::filesystem::path> path) :
 
     options.add(  //
       "NumaPolicy", Option("auto", [this](const Option& o) {
-          set_numa_config_from_option(o);
+          if (!set_numa_config_from_option(o))
+              return "NumaPolicy: invalid value '" + std::string(o) + "', keeping previous config.";
           return numa_config_information_as_string() + "\n"
                + thread_allocation_information_as_string();
       }));
@@ -138,13 +138,13 @@ Engine::Engine(std::optional<std::filesystem::path> path) :
           return std::nullopt;
       }));
 
-    network = get_default_network();
     threads.clear();
     threads.ensure_network_replicated();
     resize_threads();
 }
 
-u64 Engine::perft(const std::string& fen, Depth depth, bool isChess960) {
+std::variant<u64, PositionSetError>
+Engine::perft(const std::string& fen, Depth depth, bool isChess960) {
     verify_network();
 
     return Benchmark::perft(fen, depth, isChess960);
@@ -164,7 +164,7 @@ void Engine::search_clear() {
     tt.clear(threads);
     threads.clear();
 
-    // @TODO wont work with multiple instances
+    // TODO: does not work with multiple instances
     Tablebases::init(options["SyzygyPath"]);  // Free mapped files
 }
 
@@ -183,6 +183,8 @@ void Engine::set_on_iter(std::function<void(const Engine::InfoIter&)>&& f) {
 void Engine::set_on_bestmove(std::function<void(std::string_view, std::string_view)>&& f) {
     updateContext.onBestmove = std::move(f);
 }
+
+void Engine::set_on_start(std::function<void()>&& f) { updateContext.onStart = std::move(f); }
 
 void Engine::set_on_verify_network(std::function<void(std::string_view)>&& f) {
     onVerifyNetwork = std::move(f);
@@ -214,7 +216,7 @@ std::optional<PositionSetError> Engine::set_position(const std::string&         
 
 // modifiers
 
-void Engine::set_numa_config_from_option(const std::string& o) {
+bool Engine::set_numa_config_from_option(const std::string& o) {
     if (o == "auto" || o == "system")
     {
         numaContext.set_numa_config(NumaConfig::from_system(DefaultNumaPolicy));
@@ -230,12 +232,16 @@ void Engine::set_numa_config_from_option(const std::string& o) {
     }
     else
     {
-        numaContext.set_numa_config(NumaConfig::from_string(o));
+        auto parsed = NumaConfig::from_string(o);
+        if (!parsed.has_value())
+            return false;
+        numaContext.set_numa_config(std::move(*parsed));
     }
 
     // Force reallocation of threads in case affinities need to change.
     resize_threads();
     threads.ensure_network_replicated();
+    return true;
 }
 
 void Engine::resize_threads() {
@@ -330,7 +336,7 @@ OptionsMap&       Engine::get_options() { return options; }
 
 std::string Engine::fen() const { return pos.fen(); }
 
-void Engine::flip() { pos.flip(); }
+std::optional<PositionSetError> Engine::flip() { return pos.flip(); }
 
 std::string Engine::visualize() const {
     std::stringstream ss;
