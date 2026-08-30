@@ -19,8 +19,6 @@
 #ifndef NETWORK_H_INCLUDED
 #define NETWORK_H_INCLUDED
 
-#include <cstddef>
-#include <cstdint>
 #include <functional>
 #include <iostream>
 #include <memory>
@@ -28,8 +26,10 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <filesystem>
 
 #include "../types.h"
+#include "../misc.h"
 #include "nnue_architecture.h"
 #include "nnue_feature_transformer.h"
 #include "nnue_misc.h"
@@ -50,8 +50,7 @@ using NetworkOutput = std::tuple<Value, Value>;
 // there is no way to run destructors.
 class Network {
    public:
-    Network(EvalFile file) :
-        evalFile(file) {}
+    Network() = default;
 
     Network(const Network& other) = default;
     Network(Network&& other)      = default;
@@ -59,32 +58,37 @@ class Network {
     Network& operator=(const Network& other) = default;
     Network& operator=(Network&& other)      = default;
 
-    void load(const std::string& rootDirectory, std::string evalfilePath);
-    bool save(const std::optional<std::string>& filename) const;
+    void load(const std::filesystem::path& rootDirectory,
+              std::filesystem::path        evalfilePath,
+              EvalFile&                    evalFile);
+    bool save(const EvalFile& evalFile, const std::optional<std::filesystem::path>& filename) const;
 
-    std::size_t get_content_hash() const;
+    usize get_content_hash() const;
 
     NetworkOutput evaluate(const Position&    pos,
                            AccumulatorStack&  accumulatorStack,
                            AccumulatorCaches& cache) const;
 
 
-    void verify(std::string evalfilePath, const std::function<void(std::string_view)>&) const;
+    void verify(const std::function<void(std::string_view)>& f,
+                const EvalFile&                              evalFile,
+                std::filesystem::path                        evalfilePath) const;
+
     NnueEvalTrace trace_evaluate(const Position&    pos,
                                  AccumulatorStack&  accumulatorStack,
                                  AccumulatorCaches& cache) const;
 
-   private:
-    void load_user_net(const std::string&, const std::string&);
-    void load_internal();
+    void load_external(const std::filesystem::path&, const std::filesystem::path&, EvalFile&);
+    void load_internal(EvalFile&);
 
+   private:
     void initialize();
 
-    bool                       save(std::ostream&, const std::string&, const std::string&) const;
+    bool                       save(std::ostream&, const std::string&) const;
     std::optional<std::string> load(std::istream&);
 
-    bool read_header(std::istream&, std::uint32_t*, std::string*) const;
-    bool write_header(std::ostream&, std::uint32_t, const std::string&) const;
+    bool read_header(std::istream&, u32*, std::string*) const;
+    bool write_header(std::ostream&, u32, const std::string&) const;
 
     bool read_parameters(std::istream&, std::string&);
     bool write_parameters(std::ostream&, const std::string&) const;
@@ -95,23 +99,21 @@ class Network {
     // Evaluation function
     NetworkArchitecture network[LayerStacks];
 
-    EvalFile evalFile;
-
     bool initialized = false;
 
     // Hash value of evaluation function structure
-    static constexpr std::uint32_t hash =
+    static constexpr u32 hash =
       FeatureTransformer::get_hash_value() ^ NetworkArchitecture::get_hash_value();
 
     friend struct AccumulatorCaches;
 };
 
 
-}  // namespace Stockfish
+}  // namespace Stockfish::Eval::NNUE
 
 template<>
 struct std::hash<Stockfish::Eval::NNUE::Network> {
-    std::size_t operator()(const Stockfish::Eval::NNUE::Network& network) const noexcept {
+    Stockfish::usize operator()(const Stockfish::Eval::NNUE::Network& network) const noexcept {
         return network.get_content_hash();
     }
 };

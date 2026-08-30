@@ -19,7 +19,6 @@
 #ifndef UCI_H_INCLUDED
 #define UCI_H_INCLUDED
 
-#include <cstdint>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -33,14 +32,14 @@ namespace Stockfish {
 class Position;
 class Move;
 class Score;
-enum Square : uint8_t;
+enum Square : u8;
 using Value = int;
 
 constexpr auto StartFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
 class UCIEngine {
    public:
-    UCIEngine(int argc, char** argv);
+    UCIEngine(CommandLine cli);
 
     void loop();
 
@@ -52,22 +51,23 @@ class UCIEngine {
     static std::string to_lower(std::string str);
     static Move        to_move(const Position& pos, std::string str);
 
-    static Search::LimitsType parse_limits(std::istream& is);
+    Search::LimitsType parse_limits(std::istream& is);
 
     auto& engine_options() { return engine.get_options(); }
 
    private:
     Engine      engine;
     CommandLine cli;
+    std::string currentCmd;
 
     static void print_info_string(std::string_view str);
 
-    void          go(std::istringstream& is);
-    void          bench(std::istream& args);
-    void          benchmark(std::istream& args);
-    void          position(std::istringstream& is);
-    void          setoption(std::istringstream& is);
-    std::uint64_t perft(const Search::LimitsType&);
+    void go(std::istringstream& is);
+    void bench(std::istream& args);
+    void benchmark(std::istream& args);
+    void position(std::istringstream& is);
+    void setoption(std::istringstream& is);
+    u64  perft(const Search::LimitsType&);
 
     static void on_update_no_moves(const Engine::InfoShort& info);
     static void on_update_full(const Engine::InfoFull& info, bool showWDL);
@@ -76,8 +76,7 @@ class UCIEngine {
 
     void init_search_update_listeners();
 
-    [[noreturn]] void terminate_on_critical_error(const std::string& fullCommand,
-                                                  const std::string& message);
+    [[noreturn]] void terminate_on_critical_error(const std::string& message);
 };
 
 }  // namespace Stockfish

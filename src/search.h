@@ -23,7 +23,6 @@
 #include <array>
 #include <atomic>
 #include <cassert>
-#include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
@@ -34,7 +33,6 @@
 
 #include "history.h"
 #include "misc.h"
-#include "nnue/network.h"
 #include "nnue/nnue_accumulator.h"
 #include "numa.h"
 #include "position.h"
@@ -56,22 +54,31 @@ class TranspositionTable;
 class ThreadPool;
 class OptionsMap;
 
+namespace Eval::NNUE {
+class Network;
+}
+
 namespace Search {
 
+// syzygy_extend_pv() may lead to PVs longer than MAX_PLY
+struct RootPVMoves: public std::vector<Move> {
+    RootPVMoves() { reserve(MAX_PLY); }
+};
+
 struct PVMoves {
-    Move        moves[MAX_PLY + 1];
-    std::size_t length = 0;
+    Move  moves[MAX_PLY + 1];
+    usize length = 0;
 
     Move*       begin() { return moves; }
     const Move* begin() const { return moves; }
     Move*       end() { return moves + length; }
     const Move* end() const { return moves + length; }
 
-    Move&       operator[](std::size_t index) { return moves[index]; }
-    const Move& operator[](std::size_t index) const { return moves[index]; }
+    Move&       operator[](usize index) { return moves[index]; }
+    const Move& operator[](usize index) const { return moves[index]; }
 
-    bool        empty() const { return length == 0; }
-    std::size_t size() const { return length; }
+    bool  empty() const { return length == 0; }
+    usize size() const { return length; }
 
     void clear() { length = 0; }
 
@@ -80,7 +87,7 @@ struct PVMoves {
         moves[length++] = move;
     }
 
-    void resize(std::size_t newSize) {
+    void resize(usize newSize) {
         assert(newSize <= length);
         length = newSize;
     }
@@ -96,6 +103,12 @@ struct PVMoves {
 
         moves[0] = move;
         ++length;
+    }
+
+    PVMoves& operator=(const RootPVMoves& rhs) {
+        length = std::min(rhs.size(), usize(MAX_PLY));
+        std::memcpy(moves, rhs.data(), length * sizeof(Move));
+        return *this;
     }
 };
 
@@ -128,24 +141,30 @@ struct RootMove {
 
     explicit RootMove(Move m) { pv.push_back(m); }
     bool extract_ponder_from_tt(const TranspositionTable& tt, Position& pos);
+    bool score_is_bound() const { return scoreLowerbound || scoreUpperbound; }
+    bool score_is_exact_loss() const {
+        return score != -VALUE_INFINITE && is_loss(score) && !score_is_bound();
+    }
+    void unset_bound_flags() { scoreLowerbound = scoreUpperbound = false; }
     bool operator==(const Move& m) const { return pv[0] == m; }
     // Sort in descending order
     bool operator<(const RootMove& m) const {
         return m.score != score ? m.score < score : m.previousScore < previousScore;
     }
 
-    uint64_t effort           = 0;
-    Value    score            = -VALUE_INFINITE;
-    Value    previousScore    = -VALUE_INFINITE;
-    Value    averageScore     = -VALUE_INFINITE;
-    Value    meanSquaredScore = -VALUE_INFINITE * VALUE_INFINITE;
-    Value    uciScore         = -VALUE_INFINITE;
-    bool     scoreLowerbound  = false;
-    bool     scoreUpperbound  = false;
-    int      selDepth         = 0;
-    int      tbRank           = 0;
-    Value    tbScore;
-    PVMoves  pv;
+    u64         effort             = 0;
+    Value       score              = -VALUE_INFINITE;
+    Value       previousScore      = -VALUE_INFINITE;
+    Value       averageScore       = -VALUE_INFINITE;
+    Value       meanSquaredScore   = -VALUE_INFINITE * VALUE_INFINITE;
+    Value       uciScore           = -VALUE_INFINITE;
+    bool        scoreLowerbound    = false;
+    bool        scoreUpperbound    = false;
+    bool        previousScoreExact = false;
+    int         selDepth           = 0;
+    int         tbRank             = 0;
+    Value       tbScore;
+    RootPVMoves pv, previousPV;
 };
 
 using RootMoves = std::vector<RootMove>;
@@ -167,7 +186,7 @@ struct LimitsType {
     std::vector<std::string> searchmoves;
     TimePoint                time[COLOR_NB], inc[COLOR_NB], npmsec, movetime, startTime;
     int                      movestogo, depth, mate, perft, infinite;
-    uint64_t                 nodes;
+    u64                      nodes;
     bool                     ponderMode;
 };
 
@@ -210,13 +229,13 @@ struct InfoShort {
 
 struct InfoFull: InfoShort {
     int              selDepth;
-    size_t           multiPV;
+    usize            multiPV;
     std::string_view wdl;
     std::string_view bound;
-    size_t           timeMs;
-    size_t           nodes;
-    size_t           nps;
-    size_t           tbHits;
+    usize            timeMs;
+    usize            nodes;
+    usize            nps;
+    usize            tbHits;
     std::string_view pv;
     int              hashfull;
 };
@@ -224,7 +243,7 @@ struct InfoFull: InfoShort {
 struct InfoIteration {
     int              depth;
     std::string_view currmove;
-    size_t           currmovenumber;
+    usize            currmovenumber;
 };
 
 // Skill structure is used to implement strength limit. If we have a UCI_Elo,
@@ -249,7 +268,7 @@ struct Skill {
     }
     bool enabled() const { return level < 20.0; }
     bool time_to_pick(Depth depth) const { return depth == 1 + int(level); }
-    Move pick_best(const RootMoves&, size_t multiPV);
+    Move pick_best(const RootMoves&, usize multiPV);
 
     double level;
     Move   best = Move::none();
@@ -263,12 +282,14 @@ class SearchManager: public ISearchManager {
     using UpdateFull     = std::function<void(const InfoFull&)>;
     using UpdateIter     = std::function<void(const InfoIteration&)>;
     using UpdateBestmove = std::function<void(std::string_view, std::string_view)>;
+    using UpdateStart    = std::function<void()>;
 
     struct UpdateContext {
         UpdateShort    onUpdateNoMoves;
         UpdateFull     onUpdateFull;
         UpdateIter     onIter;
         UpdateBestmove onBestmove;
+        UpdateStart    onStart;
     };
 
 
@@ -277,10 +298,10 @@ class SearchManager: public ISearchManager {
 
     void check_time(Search::Worker& worker) override;
 
-    void pv(Search::Worker&           worker,
-            const ThreadPool&         threads,
-            const TranspositionTable& tt,
-            Depth                     depth);
+    void output_pv(Search::Worker&           worker,
+                   const ThreadPool&         threads,
+                   const TranspositionTable& tt,
+                   Depth                     depth);
 
     Stockfish::TimeManagement tm;
     double                    originalTimeAdjust;
@@ -292,8 +313,6 @@ class SearchManager: public ISearchManager {
     Value                bestPreviousScore;
     Value                bestPreviousAverageScore;
     bool                 stopOnPonderhit;
-
-    size_t id;
 
     const UpdateContext& updates;
 };
@@ -310,9 +329,9 @@ class Worker {
    public:
     Worker(SharedState&,
            std::unique_ptr<ISearchManager>,
-           size_t,
-           size_t,
-           size_t,
+           usize,
+           usize,
+           usize,
            NumaReplicatedAccessToken);
 
     // Called at instantiation to initialize reductions tables.
@@ -332,11 +351,11 @@ class Worker {
     LowPlyHistory    lowPlyHistory;
 
     CapturePieceToHistory           captureHistory;
-    ContinuationHistory             continuationHistory[2][2];
     CorrectionHistory<Continuation> continuationCorrectionHistory;
 
     TTMoveHistory    ttMoveHistory;
     SharedHistories& sharedHistory;
+    ContinuationHistory (&continuationHistory)[2][2];
 
    private:
     bool iterative_deepening();
@@ -350,7 +369,8 @@ class Worker {
 
     // This is the main search function, for both PV and non-PV nodes
     template<NodeType nodeType>
-    Value search(Position& pos, Stack* ss, Value alpha, Value beta, Depth depth, bool cutNode);
+    Value
+    search(Position& pos, Stack* ss, Value alpha, Value beta, Depth depth, const bool cutNode);
 
     // Quiescence search function, which is called by the main search
     template<NodeType nodeType>
@@ -365,15 +385,14 @@ class Worker {
     }
 
     TimePoint elapsed() const;
-    TimePoint elapsed_time() const;
 
     Value evaluate(const Position&);
 
     LimitsType limits;
 
-    size_t                pvIdx, pvLast;
-    std::atomic<uint64_t> nodes, tbHits, bestMoveChanges;
-    int                   selDepth, nmpMinPly;
+    usize              pvIdx, pvLast;
+    RelaxedAtomic<u64> nodes, tbHits, bestMoveChanges;
+    int                selDepth, nmpMinPly;
 
     Value optimism[COLOR_NB];
 
@@ -383,9 +402,9 @@ class Worker {
     Depth     rootDepth;
     Value     rootDelta;
 
-    PVMoves lastIterationPV;
+    PVMoves lastIterationIdxPV;
 
-    size_t                    threadIdx, numaThreadIdx, numaTotal;
+    usize                     threadIdx, numaThreadIdx, numaTotal;
     NumaReplicatedAccessToken numaAccessToken;
 
     // Reductions lookup table initialized at startup
