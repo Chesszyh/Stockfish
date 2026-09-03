@@ -515,11 +515,22 @@ std::string utf8_from_wstring(std::wstring_view s) {
 fs::path path_from_utf8(const std::string& path) {
 #ifdef _WIN32
     int u8len = static_cast<int>(path.size());
-    int wlen  = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), u8len, NULL, 0);
 
-    std::wstring wstr(static_cast<usize>(wlen), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, path.c_str(), u8len, wstr.data(), wlen);
-    return {wstr};
+    // First attempt UTF-8, then fall back to ANSI for old GUIs like Arena
+    constexpr int CodePages[2] = {CP_UTF8, CP_ACP};
+    for (int cp : CodePages)
+    {
+        int flags = cp == CP_UTF8 ? MB_ERR_INVALID_CHARS : 0;
+        int wlen  = MultiByteToWideChar(cp, flags, path.c_str(), u8len, NULL, 0);
+        if (wlen > 0)
+        {
+            std::wstring wstr(static_cast<usize>(wlen), L'\0');
+            MultiByteToWideChar(cp, 0, path.c_str(), u8len, wstr.data(), wlen);
+            return {wstr};
+        }
+    }
+
+    return {path};
 #else
     return {path};
 #endif
@@ -554,7 +565,7 @@ std::optional<usize> str_to_size_t(const std::string& s) {
     errno                           = 0;
     char*                    endptr = nullptr;
     const unsigned long long value  = std::strtoull(s.c_str(), &endptr, 10);
-    if (errno == ERANGE || (*endptr != '\0' && !std::isspace(*endptr))
+    if (errno == ERANGE || (*endptr != '\0' && !std::isspace(static_cast<unsigned char>(*endptr)))
         || value > std::numeric_limits<usize>::max())
         return std::nullopt;
     return static_cast<usize>(value);
@@ -568,11 +579,12 @@ std::optional<std::string> read_file_to_string(const std::string& path) {
 }
 
 void remove_whitespace(std::string& s) {
-    s.erase(std::remove_if(s.begin(), s.end(), [](char c) { return std::isspace(c); }), s.end());
+    s.erase(std::remove_if(s.begin(), s.end(), [](unsigned char c) { return std::isspace(c); }),
+            s.end());
 }
 
 bool is_whitespace(std::string_view s) {
-    return std::all_of(s.begin(), s.end(), [](char c) { return std::isspace(c); });
+    return std::all_of(s.begin(), s.end(), [](unsigned char c) { return std::isspace(c); });
 }
 
 fs::path CommandLine::get_binary_directory(fs::path argv0) {
